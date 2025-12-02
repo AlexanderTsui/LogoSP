@@ -1,4 +1,4 @@
-import collections
+import collections.abc
 from enum import Enum
 import torch.nn as nn
 
@@ -85,7 +85,7 @@ def convert_conv_type(conv_type, kernel_size, D):
     axis_types = None
     if conv_type == ConvType.SPATIAL_HYPERCUBE:
         # No temporal convolution
-        if isinstance(kernel_size, collections.Sequence):
+        if isinstance(kernel_size, collections.abc.Sequence):
             kernel_size = kernel_size[:3]
         else:
             kernel_size = [kernel_size,] * 3
@@ -98,7 +98,7 @@ def convert_conv_type(conv_type, kernel_size, D):
         # conv_type conversion already handled
         pass
     elif conv_type == ConvType.SPATIAL_HYPERCROSS:
-        if isinstance(kernel_size, collections.Sequence):
+        if isinstance(kernel_size, collections.abc.Sequence):
             kernel_size = kernel_size[:3]
         else:
             kernel_size = [kernel_size,] * 3
