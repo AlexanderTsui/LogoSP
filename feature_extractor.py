@@ -22,7 +22,7 @@ from models.fpn import Res16FPN18
 # ==================== 参数配置 ====================
 class Config:
     # 预训练checkpoint路径 (选择对应数据集的蒸馏模型)
-    checkpoint_path = '/home/pbw/data1/3D_PointCloud_Segmentation/PLSG_Net/Model_Code/src/LogoSP/LogoSP_ckpt/S3DIS/distill/checkpoint_700.tar'
+    checkpoint_path = '/home/pbw/data1/3D_PointCloud_Segmentation/PLSG_Net/Model_Code/src/LogoSP/LogoSP_ckpt/ScanNet/distill/checkpoint_300.tar'
 
     # 体素大小 (与训练时保持一致)
     voxel_size = 0.05
@@ -155,9 +155,17 @@ class LogoSPFeatureExtractor:
             return_inverse=True
         )
         
+        # 确保返回的都是 numpy 类型（MinkowskiEngine 不同版本可能返回 Tensor 或 ndarray）
+        if hasattr(voxel_coords, 'numpy'):
+            voxel_coords = voxel_coords.numpy()
+        if hasattr(unique_map, 'numpy'):
+            unique_map = unique_map.numpy()
+        if hasattr(inverse_map, 'numpy'):
+            inverse_map = inverse_map.numpy()
+        
         voxel_feats = feats[unique_map]
         
-        return voxel_coords.numpy(), voxel_feats, unique_map, inverse_map
+        return voxel_coords, voxel_feats, unique_map, inverse_map
     
     def extract_features(self, coords, colors=None, return_voxel_only=False):
         """
@@ -184,21 +192,26 @@ class LogoSPFeatureExtractor:
         voxel_coords, voxel_feats, unique_map, inverse_map = self._voxelize(coords, feats)
         
         num_voxels = len(voxel_coords)
-        print(f"[特征提取] 原始点数: {len(coords)}, 体素数: {num_voxels}")
         
         # 构建MinkowskiEngine输入
         # 添加batch维度 (batch_id=0)
+        # 原始 LogoSP 代码：坐标先转 int 再转 float，参数顺序为 (features, coords, device)
         batch_coords = np.hstack([
-            np.zeros((num_voxels, 1), dtype=np.float32),
-            voxel_coords.astype(np.float32)
+            np.zeros((num_voxels, 1), dtype=np.int32),
+            voxel_coords.astype(np.int32)
         ])
         
-        coords_tensor = torch.from_numpy(batch_coords).to(self.device)
-        feats_tensor = torch.from_numpy(voxel_feats).float().to(self.device)
+        # 转换为 tensor，坐标需要是 float（与原始 LogoSP collate_fn 一致）
+        # 确保在正确的设备上创建
+        coords_tensor = torch.from_numpy(batch_coords.astype(np.float32)).to(self.device)
+        feats_tensor = torch.from_numpy(voxel_feats.astype(np.float32)).to(self.device)
         
-        # 前向传播
-        with torch.no_grad():
-            in_field = ME.TensorField(feats_tensor, coords_tensor)
+        # 前向传播 - 使用与原始 LogoSP 一致的 TensorField 调用方式
+        # 注意：MinkowskiEngine 不支持 AMP (float16)，必须在 autocast(enabled=False) 下运行
+        with torch.no_grad(), torch.cuda.amp.autocast(enabled=False):
+            # TensorField(features, coordinates, device=device_id)
+            device_id = coords_tensor.device
+            in_field = ME.TensorField(feats_tensor, coords_tensor, device=device_id)
             voxel_features = self.model(in_field)
         
         voxel_features = voxel_features.cpu().numpy()
